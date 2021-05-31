@@ -24,15 +24,20 @@ fn int_to_binary16(int: i16) -> Signals<16> {
     binary.try_into().unwrap()
 }
 
-fn binary_to_int16(binary: Signals<16>) -> i16 {
-    let mut binary_string = String::new();
-    for bit in binary.iter() {
-        match bit {
-            Low => binary_string.push('0'),
-            High => binary_string.push('1')
-        }
+fn binary_to_int16(mut binary: Signals<16>) -> i16 {
+    let mut sign = 1;
+    if binary[0] == High {
+        sign = - 1;
+        binary = n_incrementor(not_n(binary)); 
     }
-    i16::from_str_radix(&binary_string, 2).unwrap()
+    let binary_string = binary.iter().fold(String::from(""), |mut acc, &bit| {
+        match bit {
+            Low => acc.push('0'),
+            High => acc.push('1')
+        }
+        acc
+    });
+    sign * i16::from_str_radix(&binary_string, 2).unwrap()
 }
 
 fn nand(in1: Signal, in2: Signal) -> Signal {
@@ -200,29 +205,36 @@ fn alu<const BITS: usize>(
     f: Signal,
     no: Signal
 ) -> (Signals<BITS>, Signal, Signal) {
-    let x = mux_n(bits1, [Low; BITS], zx);
-    let x = mux_n(bits1, not_n(bits1), nx);
-    let y = mux_n(bits2, [Low; BITS], zy);
-    let y = mux_n(bits2, not_n(bits2), ny);
-    let out = mux_n(and_n(x, y), n_adder(x, y), f);
+    let bits1 = mux_n(bits1, [Low; BITS], zx);
+    let bits1 = mux_n(bits1, not_n(bits1), nx);
+    let bits2 = mux_n(bits2, [Low; BITS], zy);
+    let bits2 = mux_n(bits2, not_n(bits2), ny);
+    let out = mux_n(and_n(bits1, bits2), n_adder(bits1, bits2), f);
     let out = mux_n(out, not_n(out), no);
     let zr = not(or_m_way(out));
-    let ng = out[out.len() - 1];
+    let ng = out[0];
     (out, zr, ng)
 }
 
 fn main() {
     // let vvv = [Low, Low, High, High];
-    let x = 10;
-    let y = 12;
+    let x = 5;
+    let y = -9;
     let a = int_to_binary16(x);
     let b = int_to_binary16(y);
+    println!("{:?}", x);
+    println!("{:?}", !x);
     println!("{:?}", a);
     println!("{:?}", b);
     let c = alu(a, b, Low, Low, Low, Low, High, Low);
     println!("{:?}", c);
     println!("{:?}", binary_to_int16(c.0));
-    // in1.iter().zip(in2.iter()).fold([], |acc, (&s1, &s2)| )
+
+    // // in1.iter().zip(in2.iter()).fold([], |acc, (&s1, &s2)| )
+    // assert_eq!(binary_to_int16(c.0), x + y);
+    // assert_eq!(c.1, Low);
+    // assert_eq!(c.2, Low);
+
 
 }
 
@@ -403,42 +415,50 @@ mod tests {
         ), ([Low, High, Low, Low]));
     }
 
-    // #[test]
-    // fn talu() {
-    //     assert_eq!(
-    //         alu(
+    fn check_alu(x: i16, y: i16, zx: Signal, nx: Signal, zy: Signal, ny: Signal, f: Signal, no: Signal, expected: i16) {
+        let (out, zr, ng) = alu(int_to_binary16(x), int_to_binary16(y), zx, nx, zy, ny, f, no);
+        assert_eq!(binary_to_int16(out), expected);
+        if expected == 0 {
+            assert_eq!(zr, High);
+        } else {
+            assert_eq!(zr, Low);
+        }
+        if expected < 0 {
+            assert_eq!(ng, High);
+        } else {
+            assert_eq!(ng, Low);
+        }
+    }
+    #[test]
+    fn talu() {
+        let val_a = [1,2,3,4];
+        let val_b = [1,2,3,4];
+        for a in val_a.iter() {
+            for b in val_b.iter() {
+                check_alu(*a, *b, High, Low, High, Low, High, Low, 0);
+                check_alu(*a, *b, High, High, High, High, High, High, 1);
+                check_alu(*a, *b, High, High, High, Low, High, Low, - 1);
+                check_alu(*a, *b, Low, Low, High, High, Low, Low, *a);
+                check_alu(*a, *b, High, High, Low, Low, Low, Low, *b);
 
-    //         ), 
-    //         (
-    //             [High, Low, Low, Low]
-    //         )
-    //     );
+                check_alu(*a, *b, Low, Low, High, High, Low, High, !*a);
+                check_alu(*a, *b, High, High, Low, Low, Low, High, !*b);
 
-    // }
+                check_alu(*a, *b, Low, Low, High, High, High, High, -*a);
+                check_alu(*a, *b, High, High, Low, Low, High, High, -*b);
+
+                check_alu(*a, *b, Low, High, High, High, High, High, *a + 1);
+                check_alu(*a, *b, High, High, Low, High, High, High, *b + 1);
+
+                check_alu(*a, *b, Low, Low, High, High, High, Low, *a - 1);
+                check_alu(*a, *b, High, High, Low, Low, High, Low, *b - 1);
+
+                check_alu(*a, *b, Low, Low, Low, Low, High, Low, *a + *b);
+                check_alu(*a, *b, Low, High, Low, Low, High, High, *a - *b);
+
+                check_alu(*a, *b, Low, Low, Low, Low, Low, Low, *a & *b);
+                check_alu(*a, *b, Low, High, Low, High, Low, High, *a | *b);
+            }
+        }
+    }
 }
-
-
-
-
-
-
-// fn alu<const BITS: usize>(
-//     bits1: Signals<BITS>,
-//     bits2: Signals<BITS>,
-//     zx: Signal,
-//     nx: Signal,
-//     zy: Signal,
-//     ny: Signal,
-//     f: Signal,
-//     no: Signal
-// ) -> (Signals<BITS>, Signal, Signal) {
-//     let x = mux_n(bits1, [Low; BITS], zx);
-//     let x = mux_n(bits1, not_n(bits1), nx);
-//     let y = mux_n(bits1, [Low; BITS], zy);
-//     let y = mux_n(bits1, not_n(bits1), ny);
-//     let out = mux_n(and_n(x, y), n_adder(x, y), f);
-//     let out = mux_n(out, not_n(out), no);
-//     let zr = not(or_m_way(out));
-//     let ng = out[out.len()];
-//     (out, zr, ng)
-// }
